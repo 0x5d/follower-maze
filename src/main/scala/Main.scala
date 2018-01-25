@@ -12,10 +12,27 @@ object Main extends App {
   implicit val system = ActorSystem("QuickStart")
   implicit val materializer = ActorMaterializer()
 
-  val source = Source(1 to 100)
+  val host = "127.0.0.1"
+  val sourcePort = 9090
+  val clientsPort = 9099
 
-  val done = source.runForeach(i ⇒ println(i))(materializer)
+  Tcp()
+    .bind(host, sourcePort)
+    .runForeach { c ⇒
+      val echo = Flow[ByteString]
+        .via(Framing.delimiter(
+          ByteString("\n"),
+          maximumFrameLength = 256,
+          allowTruncation = true))
+        .map(_.utf8String)
+        .map(ByteString(_))
 
-  implicit val ec = system.dispatcher
-  done.onComplete(_ ⇒ system.terminate())
+      c.handleWith(echo)
+    }
+
+  Tcp()
+    .bind(host, clientsPort)
+    .runForeach { c ⇒
+      println(s"New connection: ${c.remoteAddress}")
+    }
 }

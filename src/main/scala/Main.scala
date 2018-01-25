@@ -1,16 +1,14 @@
+import ClientActor.Message
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.actor.ActorSystem
+import akka.stream.javadsl.Tcp.IncomingConnection
 import akka.util.ByteString
 
 object Main extends App {
 
   implicit val system = ActorSystem("follower-maze")
   implicit val materializer = ActorMaterializer()
-
-  // This is how I can create an actor.
-  // Now I just need to do it for every new client.
-  system.actorOf(ClientActor.props("someId"))
 
   val host = "127.0.0.1"
   val sourcePort = 9090
@@ -20,33 +18,39 @@ object Main extends App {
   val maxFrameLength = 265
   val allowTruncation = true
 
+  val framing = Framing.delimiter(
+    ByteString(delim),
+    maxFrameLength,
+    allowTruncation
+  )
+
+  val preProcess = Flow[ByteString]
+    .via(framing)
+    .map(_.utf8String)
+
+  // Publisher
+
   val src = Tcp()
     .bind(host, sourcePort)
     .runForeach { c ⇒
-      val rcv = Flow[ByteString]
-        .via(Framing.delimiter(
-          ByteString(delim),
-          maxFrameLength,
-          allowTruncation
-        ))
-        .map(_.utf8String)
-        .map(ByteString(_))
+      val process = Flow[String]
+        .map(Message(_))
+        .map( msg => ByteString(msg.original))
 
-      c.handleWith(rcv)
+      c.flow.via(preProcess).via(process)
     }
+
+  // Clients
+
+  val actorCreation = Flow[String].map(s => (s, system.actorOf(ClientActor.props(s))))
 
   val clients = Tcp()
     .bind(host, clientsPort)
     .runForeach { c ⇒
-      val rcv = Flow[ByteString]
-        .via(Framing.delimiter(
-          ByteString(delim),
-          maxFrameLength,
-          allowTruncation
-        ))
-        .map(_.utf8String)
-        .map(ByteString(_))
+      val process = Flow[String]
+        .via(actorCreation)
+        .map { case (s, _) => ByteString(s)}
 
-      c.handleWith(rcv)
+      c.flow.via(preProcess).via(process)
     }
 }

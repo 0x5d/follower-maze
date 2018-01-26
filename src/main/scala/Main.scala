@@ -35,22 +35,26 @@ object Main extends App {
     .runForeach { c ⇒
       val process = Flow[String]
         .map(Message(_))
-        .map( msg => ByteString(msg.original))
+        .map { m =>
+          println(m)
+          system.actorSelection("/user/**") ! m
+        }.map( _ => ByteString("ok"))
 
-      c.flow.via(preProcess).via(process)
+      c.handleWith(preProcess.via(process))
+
+//      c.flow.via(preProcess).via(process).toMat(Sink.ignore)(Keep.right)
     }
 
   // Clients
 
-  val actorCreation = Flow[String].map(s => (s, system.actorOf(ClientActor.props(s))))
-
   val clients = Tcp()
     .bind(host, clientsPort)
     .runForeach { c ⇒
+      val actorCreation = Flow[String].map(id => (id, system.actorOf(ClientActor.props(id, c), name = id)))
       val process = Flow[String]
         .via(actorCreation)
-        .map { case (s, _) => ByteString(s)}
+        .map(_ => ByteString("ok"))
 
-      c.flow.via(preProcess).via(process)
+      c.handleWith(preProcess.via(process))
     }
 }

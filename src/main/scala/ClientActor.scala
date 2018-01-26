@@ -1,5 +1,6 @@
 import akka.actor.{Actor, Props}
 import akka.event.Logging
+import akka.stream.scaladsl.Tcp.IncomingConnection
 
 object ClientActor {
 
@@ -7,7 +8,7 @@ object ClientActor {
 
     // This could be better w/ Shapeless
     def apply(msg: String): Message = {
-      msg.split("|").toList match {
+      msg.split("\\|").toList match {
         case id :: "F" :: from :: to :: Nil => Follow(msg, id, from, to)
         case id :: "U" :: from :: to :: Nil => Unfollow(msg, id, from, to)
         case id :: "P" :: from :: to :: Nil => Private(msg, id, from, to)
@@ -31,10 +32,10 @@ object ClientActor {
     val id = "unknown"
   }
 
-  def props(id: String) = Props(new ClientActor(id))
+  def props(id: String, c: IncomingConnection) = Props(new ClientActor(id, c))
 }
 
-class ClientActor(id: String) extends Actor {
+class ClientActor(id: String, c: IncomingConnection) extends Actor {
   import ClientActor._
 
   val log = Logging(context.system, this)
@@ -45,6 +46,7 @@ class ClientActor(id: String) extends Actor {
     case Private(msg, msgId, from, to) if to == id => log.info(msg)
     case StatusUpdate(msg, msgId, from) => log.info(msg)
     case Broadcast(msg, msgId) => log.info(msg)
-    case _ ⇒ log.info("received unknown message")
+    case UnknownMessage(msg) => log.info(msg)
+    case _ => log.info("Not my problem")
   }
 }

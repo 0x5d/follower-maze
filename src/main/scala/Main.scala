@@ -2,7 +2,6 @@ import ClientActor.Message
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.actor.ActorSystem
-import akka.stream.javadsl.Tcp.IncomingConnection
 import akka.util.ByteString
 
 object Main extends App {
@@ -36,13 +35,10 @@ object Main extends App {
       val process = Flow[String]
         .map(Message(_))
         .map { m =>
-          println(m)
           system.actorSelection("/user/**") ! m
         }.map( _ => ByteString("ok"))
 
       c.handleWith(preProcess.via(process))
-
-//      c.flow.via(preProcess).via(process).toMat(Sink.ignore)(Keep.right)
     }
 
   // Clients
@@ -50,7 +46,14 @@ object Main extends App {
   val clients = Tcp()
     .bind(host, clientsPort)
     .runForeach { c ⇒
-      val actorCreation = Flow[String].map(id => (id, system.actorOf(ClientActor.props(id, c), name = id)))
+      // CONNECTIONS CAN'T BE SHARED (https://doc.akka.io/docs/akka/current/stream/stream-io.html), SO:
+      // get a client incoming connection ->
+      // create an actor to wait for a bit and get the events from the publisher corresponding to the current client ->
+      // ask the actor for the received events ->
+      // the actor blocks for a time window (shorter than the client timeout) ->
+      // the actor returns the receiver events ->
+      // send the events, sorted by event sequence id, to the client
+      val actorCreation = Flow[String].map(id => system.actorOf(ClientActor.props(id), name = id))
       val process = Flow[String]
         .via(actorCreation)
         .map(_ => ByteString("ok"))

@@ -13,7 +13,7 @@ object ClientActor {
         case id :: "U" :: from :: to :: Nil => Unfollow(msg, id, from, to)
         case id :: "P" :: from :: to :: Nil => Private(msg, id, from, to)
         case id :: "S" :: from :: Nil => StatusUpdate(msg, id, from)
-        case id :: "B" :: from :: Nil => Broadcast(msg, id)
+        case id :: "B" :: Nil => Broadcast(msg, id)
         case _ => UnknownMessage(msg)
       }
     }
@@ -32,10 +32,10 @@ object ClientActor {
     val id = "unknown"
   }
 
-  def props(id: String, c: IncomingConnection) = Props(new ClientActor(id, c))
+  def props(id: String) = Props(new ClientActor(id))
 }
 
-class ClientActor(id: String, c: IncomingConnection) extends Actor {
+class ClientActor(id: String) extends Actor {
   import ClientActor._
 
   val log = Logging(context.system, this)

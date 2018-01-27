@@ -1,61 +1,92 @@
-import akka.actor.{Actor, ActorRef, Props}
+import scala.collection.mutable
+import akka.actor.{Actor, ActorRef}
 import akka.event.Logging
 import akka.util.ByteString
+
+import scala.concurrent.duration.{FiniteDuration, SECONDS}
 
 object ClientActor {
 
   final case class SetNotifier(a: ActorRef)
   final case class SetId(id: String)
+  object Flush
 
-  object Message {
+  object Event {
 
     // This could be better w/ Shapeless
-    def apply(msg: String): Message = {
+    def apply(msg: String): Event = {
       msg.split("\\|").toList match {
-        case id :: "F" :: from :: to :: Nil => Follow(msg, id, from, to)
-        case id :: "U" :: from :: to :: Nil => Unfollow(msg, id, from, to)
-        case id :: "P" :: from :: to :: Nil => Private(msg, id, from, to)
-        case id :: "S" :: from :: Nil => StatusUpdate(msg, id, from)
-        case id :: "B" :: Nil => Broadcast(msg, id)
-        case _ => UnknownMessage(msg)
+        case id :: "F" :: from :: to :: Nil => Follow(msg, id.toInt, from, to)
+        case id :: "U" :: from :: to :: Nil => Unfollow(msg, id.toInt, from, to)
+        case id :: "P" :: from :: to :: Nil => Private(msg, id.toInt, from, to)
+        case id :: "S" :: from :: Nil => StatusUpdate(msg, id.toInt, from)
+        case id :: "B" :: Nil => Broadcast(msg, id.toInt)
+        case _ => UnknownEvent(msg)
       }
     }
   }
 
-  trait Message {
+  trait Event {
     val original: String
-    val id: String
+    val id: Int
   }
-  final case class Follow(original: String, id: String, from: String, to: String) extends Message
-  final case class Unfollow(original: String, id: String, from: String, to: String) extends Message
-  final case class Private(original: String, id: String, from: String, to: String) extends Message
-  final case class StatusUpdate(original: String, id: String, from: String) extends Message
-  final case class Broadcast(original: String, id: String) extends Message
-  final case class UnknownMessage(original: String) extends Message {
-    val id = "unknown"
+  final case class Follow(original: String, id: Int, from: String, to: String) extends Event
+  final case class Unfollow(original: String, id: Int, from: String, to: String) extends Event
+  final case class Private(original: String, id: Int, from: String, to: String) extends Event
+  final case class StatusUpdate(original: String, id: Int, from: String) extends Event
+  final case class Broadcast(original: String, id: Int) extends Event
+  final case class UnknownEvent(original: String) extends Event {
+    val id = -1
   }
 }
 
 class ClientActor extends Actor {
   import ClientActor._
+  import scala.concurrent.ExecutionContext.Implicits.global
 
-  var id = ""
-  var notifier: Option[ActorRef] = None
+  private var id = ""
+  private var notifier: Option[ActorRef] = None
+
+  private val followees = mutable.Set[String]()
+  private var events = Seq[Event]()
 
   val log = Logging(context.system, this)
 
+  val interval = FiniteDuration(1, SECONDS)
+
+  context.system.scheduler.schedule(interval, interval, self, Flush)
+
   def receive = {
+    case Flush => flush
+
     case SetId(s) => id = s
+
     case SetNotifier(a) => notifier = Some(a)
 
-    case Follow(msg, msgId, from, to) if to == id => send(msg)
-    case Unfollow(msg, msgId, from, to) if to == id => send(msg)
-    case Private(msg, msgId, from, to) if to == id => send(msg)
-    case StatusUpdate(msg, msgId, from) => send(msg)
-    case Broadcast(msg, msgId) => send(msg)
-    case UnknownMessage(msg) => log.info(s"Unknown: $msg")
-    case _ => log.info("Not my problem")
+    case e: Follow =>
+      if (e.from == id) followees += e.to
+      else if (e.to == id) events = events :+ e
+
+    case e: Unfollow =>
+      if (e.from == id) followees -= e.to
+
+    case e: Private if e.to == id => events = events :+ e
+
+    case e: StatusUpdate if followees.contains(e.from) => events = events :+ e
+
+    case e: Broadcast => events = events :+ e
+
+    case UnknownEvent(msg) => log.info(s"Unknown: $msg")
+
+    case _ => ()
   }
 
-  def send(msg: String) = notifier.foreach(_ ! ByteString(msg))
+  private def send(msg: String) = notifier.foreach(_ ! ByteString(msg))
+
+  private def flush = {
+    if(events.nonEmpty) println(s"floosh: $events")
+    val es = events.sortBy(_.id)
+    events = Seq[Event]()
+    es.foreach(e => send(e.original))
+  }
 }

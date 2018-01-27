@@ -1,4 +1,4 @@
-import ClientActor.{Message, SetId, SetNotifier}
+import ClientActor.{Event, SetId, SetNotifier}
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.actor.{ActorSystem, Props}
@@ -33,7 +33,7 @@ object Main extends App {
     .bind(host, sourcePort)
     .runForeach { c ⇒
       val process = Flow[String]
-        .map(Message(_))
+        .map(Event(_))
         .map { m =>
           system.actorSelection("/user/**") ! m
         }.map( _ => ByteString("ok"))

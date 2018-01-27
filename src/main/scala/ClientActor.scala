@@ -1,8 +1,11 @@
-import akka.actor.{Actor, Props}
+import akka.actor.{Actor, ActorRef, Props}
 import akka.event.Logging
-import akka.stream.scaladsl.Tcp.IncomingConnection
+import akka.util.ByteString
 
 object ClientActor {
+
+  final case class SetNotifier(a: ActorRef)
+  final case class SetId(id: String)
 
   object Message {
 
@@ -31,22 +34,28 @@ object ClientActor {
   final case class UnknownMessage(original: String) extends Message {
     val id = "unknown"
   }
-
-  def props(id: String) = Props(new ClientActor(id))
 }
 
-class ClientActor(id: String) extends Actor {
+class ClientActor extends Actor {
   import ClientActor._
+
+  var id = ""
+  var notifier: Option[ActorRef] = None
 
   val log = Logging(context.system, this)
 
   def receive = {
-    case Follow(msg, msgId, from, to) if to == id => log.info(msg)
-    case Unfollow(msg, msgId, from, to) if to == id => log.info(msg)
-    case Private(msg, msgId, from, to) if to == id => log.info(msg)
-    case StatusUpdate(msg, msgId, from) => log.info(msg)
-    case Broadcast(msg, msgId) => log.info(msg)
-    case UnknownMessage(msg) => log.info(msg)
+    case SetId(s) => id = s
+    case SetNotifier(a) => notifier = Some(a)
+
+    case Follow(msg, msgId, from, to) if to == id => send(msg)
+    case Unfollow(msg, msgId, from, to) if to == id => send(msg)
+    case Private(msg, msgId, from, to) if to == id => send(msg)
+    case StatusUpdate(msg, msgId, from) => send(msg)
+    case Broadcast(msg, msgId) => send(msg)
+    case UnknownMessage(msg) => log.info(s"Unknown: $msg")
     case _ => log.info("Not my problem")
   }
+
+  def send(msg: String) = notifier.foreach(_ ! ByteString(msg))
 }

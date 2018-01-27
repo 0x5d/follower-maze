@@ -1,7 +1,7 @@
-import ClientActor.Message
+import ClientActor.{Message, SetId, SetNotifier}
 import akka.stream._
 import akka.stream.scaladsl._
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, Props}
 import akka.util.ByteString
 
 object Main extends App {
@@ -46,18 +46,20 @@ object Main extends App {
   val clients = Tcp()
     .bind(host, clientsPort)
     .runForeach { c ⇒
-      // CONNECTIONS CAN'T BE SHARED (https://doc.akka.io/docs/akka/current/stream/stream-io.html), SO:
-      // get a client incoming connection ->
-      // create an actor to wait for a bit and get the events from the publisher corresponding to the current client ->
-      // ask the actor for the received events ->
-      // the actor blocks for a time window (shorter than the client timeout) ->
-      // the actor returns the receiver events ->
-      // send the events, sorted by event sequence id, to the client
-      val actorCreation = Flow[String].map(id => system.actorOf(ClientActor.props(id), name = id))
-      val process = Flow[String]
-        .via(actorCreation)
-        .map(_ => ByteString("ok"))
 
-      c.handleWith(preProcess.via(process))
+      val src = Source.actorRef[ByteString](1000, OverflowStrategy.fail)
+
+      val clientActor = system.actorOf(Props(new ClientActor))
+
+      val sink = Flow[ByteString]
+        .via(preProcess)
+        .via(Flow[String].map(id => clientActor ! SetId(id)))
+        .to(Sink.ignore)
+
+      val (notifier, _) = c.flow
+        .join(BidiFlow.identity[ByteString, ByteString])
+        .runWith(src, sink)
+
+      clientActor ! SetNotifier(notifier)
     }
 }

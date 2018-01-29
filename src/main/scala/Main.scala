@@ -1,7 +1,8 @@
 import ClientActor.{Event, SetId, SetNotifier}
+import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl._
-import akka.actor.{ActorSystem, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.util.ByteString
 
 object Main extends App {
@@ -54,11 +55,21 @@ object Main extends App {
       val sink = Flow[ByteString]
         .via(preProcess)
         .via(Flow[String].map(id => clientActor ! SetId(id)))
-        .to(Sink.ignore)
+        .to(Sink.actorRef(clientActor, "wtf"))
 
-      val (notifier, _) = c.flow
-        .join(BidiFlow.identity[ByteString, ByteString])
-        .runWith(src, sink)
+      val (notifier, _) = c.flow.runWith(src.map { e =>
+        println(e.utf8String)
+        e
+      }, sink)
+
+//      ^^^ is the same as below in this case, it seems.
+
+//      val (notifier, _) = c.flow
+//        .join(BidiFlow.identity[ByteString, ByteString])
+//        .runWith(src.map { e =>
+//          println(e.utf8String)
+//          e
+//        }, sink)
 
       clientActor ! SetNotifier(notifier)
     }

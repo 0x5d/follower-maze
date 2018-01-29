@@ -57,7 +57,8 @@ class ClientActor extends Actor {
   context.system.scheduler.schedule(interval, interval, self, Flush)
 
   def receive = {
-    case Flush => flush
+    case Flush =>
+      flush
 
     case SetId(s) => id = s
 
@@ -84,9 +85,11 @@ class ClientActor extends Actor {
   private def send(msg: String) = notifier.foreach(_ ! ByteString(msg))
 
   private def flush = {
-    if(events.nonEmpty) println(s"floosh: $events")
-    val es = events.sortBy(_.id)
-    events = Seq[Event]()
-    es.foreach(e => send(e.original))
+    if (events.nonEmpty) {
+      println(s"Flushing $id: $events")
+      val es = events.sortBy(_.id)
+      events = Seq[Event]()
+      es.foreach(e => send(e.original))
+    }
   }
 }
